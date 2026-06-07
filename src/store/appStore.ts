@@ -22,6 +22,16 @@ import {
   mockUser
 } from '../data/mockData';
 
+const STORAGE_KEY = 'smart_retail_inspection_data';
+
+interface PendingSyncIds {
+  priceRecords: string[];
+  promotionRecords: string[];
+  photos: string[];
+  rectifications: string[];
+  [key: string]: string[];
+}
+
 interface AppState {
   user: User;
   stores: Store[];
@@ -35,7 +45,7 @@ interface AppState {
   currentTask: InspectionTask | null;
   currentStore: Store | null;
   isOffline: boolean;
-  pendingSyncData: any[];
+  pendingSyncIds: PendingSyncIds;
 
   setCurrentTask: (task: InspectionTask | null) => void;
   setCurrentStore: (store: Store | null) => void;
@@ -52,76 +62,184 @@ interface AppState {
   addReport: (report: InspectionReport) => void;
   syncProducts: (products: Product[]) => void;
   setOffline: (offline: boolean) => void;
+  syncAllData: () => Promise<boolean>;
+  getPendingSyncCount: () => number;
+  resetAllData: () => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+const loadFromStorage = (): Partial<AppState> | null => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (data) {
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    console.error('Failed to load data from localStorage:', e);
+  }
+  return null;
+};
+
+const saveToStorage = (state: Partial<AppState>) => {
+  try {
+    const dataToSave = {
+      priceRecords: state.priceRecords,
+      promotionRecords: state.promotionRecords,
+      photos: state.photos,
+      rectifications: state.rectifications,
+      reports: state.reports,
+      tasks: state.tasks,
+      isOffline: state.isOffline,
+      pendingSyncIds: state.pendingSyncIds
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+  } catch (e) {
+    console.error('Failed to save data to localStorage:', e);
+  }
+};
+
+const initialPendingSync: PendingSyncIds = {
+  priceRecords: [],
+  promotionRecords: [],
+  photos: [],
+  rectifications: []
+};
+
+const getInitialState = (): Partial<AppState> => {
+  const stored = loadFromStorage();
+  if (stored) {
+    return {
+      priceRecords: stored.priceRecords || mockPriceRecords,
+      promotionRecords: stored.promotionRecords || mockPromotionRecords,
+      photos: stored.photos || mockPhotos,
+      rectifications: stored.rectifications || mockRectifications,
+      reports: stored.reports || mockReports,
+      tasks: stored.tasks || mockTasks,
+      isOffline: stored.isOffline || false,
+      pendingSyncIds: stored.pendingSyncIds || initialPendingSync
+    };
+  }
+  return {};
+};
+
+const initialState = getInitialState();
+
+export const useAppStore = create<AppState>((set, get) => ({
   user: mockUser,
   stores: mockStores,
-  tasks: mockTasks,
+  tasks: initialState.tasks || mockTasks,
   products: mockProducts,
-  priceRecords: mockPriceRecords,
-  promotionRecords: mockPromotionRecords,
-  photos: mockPhotos,
-  rectifications: mockRectifications,
-  reports: mockReports,
+  priceRecords: initialState.priceRecords || mockPriceRecords,
+  promotionRecords: initialState.promotionRecords || mockPromotionRecords,
+  photos: initialState.photos || mockPhotos,
+  rectifications: initialState.rectifications || mockRectifications,
+  reports: initialState.reports || mockReports,
   currentTask: null,
   currentStore: null,
-  isOffline: false,
-  pendingSyncData: [],
+  isOffline: initialState.isOffline || false,
+  pendingSyncIds: initialState.pendingSyncIds || initialPendingSync,
 
   setCurrentTask: (task) => set({ currentTask: task }),
   setCurrentStore: (store) => set({ currentStore: store }),
 
-  claimTask: (taskId, inspector) =>
+  claimTask: (taskId, inspector) => {
     set((state) => ({
       tasks: state.tasks.map((t) =>
         t.id === taskId ? { ...t, status: 'in_progress', inspector } : t
       )
-    })),
+    }));
+    saveToStorage(get());
+  },
 
-  updateTaskProgress: (taskId, progress) =>
+  updateTaskProgress: (taskId, progress) => {
     set((state) => ({
       tasks: state.tasks.map((t) =>
         t.id === taskId ? { ...t, progress } : t
       )
-    })),
+    }));
+    saveToStorage(get());
+  },
 
-  completeTask: (taskId) =>
+  completeTask: (taskId) => {
     set((state) => ({
       tasks: state.tasks.map((t) =>
         t.id === taskId ? { ...t, status: 'completed', progress: 100 } : t
       )
-    })),
+    }));
+    saveToStorage(get());
+  },
 
-  addPriceRecord: (record) =>
-    set((state) => ({
-      priceRecords: [...state.priceRecords, record]
-    })),
+  addPriceRecord: (record) => {
+    const state = get();
+    const newPendingSync = { ...state.pendingSyncIds };
+    newPendingSync.priceRecords = [...newPendingSync.priceRecords, record.id];
 
-  addPromotionRecord: (record) =>
-    set((state) => ({
-      promotionRecords: [...state.promotionRecords, record]
-    })),
+    set({
+      priceRecords: [...state.priceRecords, record],
+      pendingSyncIds: newPendingSync
+    });
+    saveToStorage(get());
+  },
 
-  addPhoto: (photo) =>
-    set((state) => ({
-      photos: [...state.photos, photo]
-    })),
+  addPromotionRecord: (record) => {
+    const state = get();
+    const newPendingSync = { ...state.pendingSyncIds };
+    newPendingSync.promotionRecords = [...newPendingSync.promotionRecords, record.id];
 
-  addRectification: (rectification) =>
-    set((state) => ({
-      rectifications: [...state.rectifications, rectification]
-    })),
+    set({
+      promotionRecords: [...state.promotionRecords, record],
+      pendingSyncIds: newPendingSync
+    });
+    saveToStorage(get());
+  },
 
-  updateRectification: (id, updates) =>
-    set((state) => ({
+  addPhoto: (photo) => {
+    const state = get();
+    const newPendingSync = { ...state.pendingSyncIds };
+    newPendingSync.photos = [...newPendingSync.photos, photo.id];
+
+    set({
+      photos: [...state.photos, photo],
+      pendingSyncIds: newPendingSync
+    });
+    saveToStorage(get());
+  },
+
+  addRectification: (rectification) => {
+    const state = get();
+    const newPendingSync = { ...state.pendingSyncIds };
+    newPendingSync.rectifications = [...newPendingSync.rectifications, rectification.id];
+
+    set({
+      rectifications: [...state.rectifications, rectification],
+      pendingSyncIds: newPendingSync
+    });
+    saveToStorage(get());
+  },
+
+  updateRectification: (id, updates) => {
+    const state = get();
+    const newPendingSync = { ...state.pendingSyncIds };
+    if (!newPendingSync.rectifications.includes(id)) {
+      newPendingSync.rectifications = [...newPendingSync.rectifications, id];
+    }
+
+    set({
       rectifications: state.rectifications.map((r) =>
         r.id === id ? { ...r, ...updates } : r
-      )
-    })),
+      ),
+      pendingSyncIds: newPendingSync
+    });
+    saveToStorage(get());
+  },
 
-  replyRectification: (id, content) =>
-    set((state) => ({
+  replyRectification: (id, content) => {
+    const state = get();
+    const newPendingSync = { ...state.pendingSyncIds };
+    if (!newPendingSync.rectifications.includes(id)) {
+      newPendingSync.rectifications = [...newPendingSync.rectifications, id];
+    }
+
+    set({
       rectifications: state.rectifications.map((r) =>
         r.id === id
           ? {
@@ -131,11 +249,20 @@ export const useAppStore = create<AppState>((set) => ({
               replyTime: new Date().toLocaleString()
             }
           : r
-      )
-    })),
+      ),
+      pendingSyncIds: newPendingSync
+    });
+    saveToStorage(get());
+  },
 
-  verifyRectification: (id, result, remark) =>
-    set((state) => ({
+  verifyRectification: (id, result, remark) => {
+    const state = get();
+    const newPendingSync = { ...state.pendingSyncIds };
+    if (!newPendingSync.rectifications.includes(id)) {
+      newPendingSync.rectifications = [...newPendingSync.rectifications, id];
+    }
+
+    set({
       rectifications: state.rectifications.map((r) =>
         r.id === id
           ? {
@@ -146,16 +273,71 @@ export const useAppStore = create<AppState>((set) => ({
               verifyTime: new Date().toLocaleString()
             }
           : r
-      )
-    })),
+      ),
+      pendingSyncIds: newPendingSync
+    });
+    saveToStorage(get());
+  },
 
-  addReport: (report) =>
+  addReport: (report) => {
     set((state) => ({
       reports: [...state.reports, report]
-    })),
+    }));
+    saveToStorage(get());
+  },
 
-  syncProducts: (products) =>
-    set({ products }),
+  syncProducts: (products) => {
+    set({ products });
+    saveToStorage(get());
+  },
 
-  setOffline: (offline) => set({ isOffline: offline })
+  setOffline: (offline) => {
+    set({ isOffline: offline });
+    saveToStorage(get());
+  },
+
+  syncAllData: async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const state = get();
+    if (state.isOffline) {
+      return false;
+    }
+
+    set({
+      pendingSyncIds: {
+        priceRecords: [],
+        promotionRecords: [],
+        photos: [],
+        rectifications: []
+      }
+    });
+    saveToStorage(get());
+    return true;
+  },
+
+  getPendingSyncCount: () => {
+    const state = get();
+    const ids = state.pendingSyncIds;
+    return (
+      ids.priceRecords.length +
+      ids.promotionRecords.length +
+      ids.photos.length +
+      ids.rectifications.length
+    );
+  },
+
+  resetAllData: () => {
+    localStorage.removeItem(STORAGE_KEY);
+    set({
+      priceRecords: mockPriceRecords,
+      promotionRecords: mockPromotionRecords,
+      photos: mockPhotos,
+      rectifications: mockRectifications,
+      reports: mockReports,
+      tasks: mockTasks,
+      isOffline: false,
+      pendingSyncIds: initialPendingSync
+    });
+  }
 }));

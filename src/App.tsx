@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Layout, Menu, Avatar, Dropdown, Badge } from 'antd';
 import {
   ShopOutlined,
@@ -12,7 +12,8 @@ import {
   UserOutlined,
   BellOutlined,
   WifiOutlined,
-  DisconnectOutlined
+  DisconnectOutlined,
+  SyncOutlined
 } from '@ant-design/icons';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from './store/appStore';
@@ -31,7 +32,7 @@ const App: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
-  const { user, isOffline, rectifications } = useAppStore();
+  const { user, isOffline, rectifications, getPendingSyncCount, pendingSyncIds } = useAppStore();
 
   const menuItems = [
     {
@@ -79,6 +80,8 @@ const App: React.FC = () => {
   const pendingRectifications = rectifications.filter(
     (r) => r.status === 'pending' || r.status === 'processing'
   ).length;
+
+  const pendingSyncCount = useMemo(() => getPendingSyncCount(), [pendingSyncIds]);
 
   const userMenu = {
     items: [
@@ -148,6 +151,11 @@ const App: React.FC = () => {
               {isOffline ? <DisconnectOutlined /> : <WifiOutlined />}
               <span style={{ fontSize: 12 }}>{isOffline ? '离线模式' : '在线'}</span>
             </div>
+            {pendingSyncCount > 0 && (
+              <Badge count={pendingSyncCount} size="small" color="#faad14">
+                <SyncOutlined style={{ fontSize: 20, color: '#666', cursor: 'pointer' }} />
+              </Badge>
+            )}
             <Badge count={pendingRectifications} size="small">
               <BellOutlined style={{ fontSize: 20, color: '#666', cursor: 'pointer' }} />
             </Badge>

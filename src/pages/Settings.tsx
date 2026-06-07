@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Card,
+  Row,
+  Col,
   Form,
   Input,
   Button,
@@ -35,12 +37,41 @@ import { mockProducts } from '../data/mockData';
 const { Option } = Select;
 
 const Settings: React.FC = () => {
-  const { user, products, setOffline, isOffline, syncProducts } = useAppStore();
+  const { user, products, setOffline, isOffline, syncProducts, pendingSyncIds, syncAllData, getPendingSyncCount, resetAllData, priceRecords, promotionRecords, photos, rectifications } = useAppStore();
   const [form] = Form.useForm();
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
+  const [dataSyncing, setDataSyncing] = useState(false);
   const [aboutModal, setAboutModal] = useState(false);
   const [clearDataModal, setClearDataModal] = useState(false);
+
+  const pendingCount = useMemo(() => getPendingSyncCount(), [pendingSyncIds]);
+
+  const pendingBreakdown = useMemo(() => [
+    { label: '核价记录', count: pendingSyncIds.priceRecords.length },
+    { label: '促销核验', count: pendingSyncIds.promotionRecords.length },
+    { label: '照片证据', count: pendingSyncIds.photos.length },
+    { label: '整改记录', count: pendingSyncIds.rectifications.length }
+  ], [pendingSyncIds]);
+
+  const handleSyncAllData = async () => {
+    if (isOffline) {
+      message.warning('当前处于离线模式，请先切换到在线模式');
+      return;
+    }
+    if (pendingCount === 0) {
+      message.info('没有待同步的数据');
+      return;
+    }
+    setDataSyncing(true);
+    const success = await syncAllData();
+    setDataSyncing(false);
+    if (success) {
+      message.success(`数据同步成功，共同步 ${pendingCount} 条记录`);
+    } else {
+      message.error('数据同步失败，请检查网络连接');
+    }
+  };
 
   const handleSyncProducts = () => {
     setSyncing(true);
@@ -64,22 +95,37 @@ const Settings: React.FC = () => {
     message.success('设置已保存');
   };
 
-  const handleClearData = () => {
-    message.warning('离线数据已清除');
-    setClearDataModal(false);
-  };
-
   const handleToggleOffline = (checked: boolean) => {
     setOffline(checked);
     message.info(checked ? '已切换到离线模式' : '已切换到在线模式');
   };
 
-  const storageInfo = {
-    total: '100 MB',
-    used: '23.5 MB',
-    percent: 23.5,
-    photoCount: 45,
-    recordCount: 128
+  const storageInfo = useMemo(() => {
+    const priceRecordCount = priceRecords.length;
+    const promotionRecordCount = promotionRecords.length;
+    const photoCount = photos.length;
+    const rectCount = rectifications.length;
+    const totalRecords = priceRecordCount + promotionRecordCount + photoCount + rectCount;
+    const approxKB = totalRecords * 2 + photoCount * 50;
+    const approxMB = (approxKB / 1024).toFixed(1);
+    const percent = Math.min((approxKB / (100 * 1024)) * 100, 100);
+
+    return {
+      total: '100 MB',
+      used: `${approxMB} MB`,
+      percent,
+      photoCount,
+      priceRecordCount,
+      promotionRecordCount,
+      rectCount,
+      totalRecords
+    };
+  }, [priceRecords, promotionRecords, photos, rectifications]);
+
+  const handleClearData = () => {
+    resetAllData();
+    setClearDataModal(false);
+    message.success('离线数据已清除');
   };
 
   return (
@@ -138,8 +184,18 @@ const Settings: React.FC = () => {
             {isOffline && (
               <Alert
                 message="当前处于离线模式"
-                description="数据将暂存本地，联网后自动同步"
+                description="新增数据将暂存本地，联网后点击同步按钮上传"
                 type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+            )}
+
+            {pendingCount > 0 && (
+              <Alert
+                message={`有 ${pendingCount} 条数据待同步`}
+                description="建议在联网状态下点击下方按钮进行同步"
+                type="info"
                 showIcon
                 style={{ marginBottom: 16 }}
               />
@@ -150,18 +206,33 @@ const Settings: React.FC = () => {
               dataSource={[
                 {
                   title: '离线模式',
-                  desc: '开启后数据暂存本地，联网后自动同步',
+                  desc: '开启后数据暂存本地，联网后手动同步',
                   action: (
                     <Switch checked={isOffline} onChange={handleToggleOffline} />
                   ),
                   icon: isOffline ? <DisconnectOutlined style={{ color: '#ff4d4f' }} /> : <WifiOutlined style={{ color: '#52c41a' }} />
                 },
                 {
+                  title: '待同步数据',
+                  desc: pendingBreakdown.map(item => `${item.label}: ${item.count}条`).join('  |  '),
+                  action: (
+                    <Button
+                      type="primary"
+                      icon={<CloudUploadOutlined />}
+                      onClick={handleSyncAllData}
+                      loading={dataSyncing}
+                      disabled={isOffline || pendingCount === 0}
+                    >
+                      同步所有数据
+                    </Button>
+                  ),
+                  icon: <DatabaseOutlined />
+                },
+                {
                   title: '商品清单同步',
                   desc: `当前版本：2024-01-15 · 共 ${products.length} 个商品`,
                   action: (
                     <Button
-                      type="primary"
                       icon={<CloudDownloadOutlined />}
                       onClick={handleSyncProducts}
                       loading={syncing}
@@ -169,10 +240,10 @@ const Settings: React.FC = () => {
                       同步
                     </Button>
                   ),
-                  icon: <DatabaseOutlined />
+                  icon: <FileTextOutlined />
                 },
                 {
-                  title: '门店数据同步',
+                  title: '门店基础数据',
                   desc: '上次同步：2024-01-20 10:30',
                   action: (
                     <Button icon={<CloudDownloadOutlined />}>同步</Button>
@@ -240,10 +311,11 @@ const Settings: React.FC = () => {
             <List
               size="small"
               dataSource={[
-                { label: '照片数据', size: '18.2 MB', count: storageInfo.photoCount },
-                { label: '巡检记录', size: '3.5 MB', count: storageInfo.recordCount },
-                { label: '商品数据', size: '1.2 MB', count: products.length },
-                { label: '其他数据', size: '0.6 MB', count: '-' }
+                { label: '核价记录', size: '≈ ' + (storageInfo.priceRecordCount * 0.002).toFixed(2) + ' KB', count: storageInfo.priceRecordCount },
+                { label: '促销核验', size: '≈ ' + (storageInfo.promotionRecordCount * 0.002).toFixed(2) + ' KB', count: storageInfo.promotionRecordCount },
+                { label: '照片数据', size: '≈ ' + (storageInfo.photoCount * 0.05).toFixed(1) + ' MB', count: storageInfo.photoCount },
+                { label: '整改记录', size: '≈ ' + (storageInfo.rectCount * 0.003).toFixed(2) + ' KB', count: storageInfo.rectCount },
+                { label: '商品数据', size: '≈ 0.1 MB', count: products.length }
               ]}
               renderItem={(item) => (
                 <List.Item>
@@ -263,7 +335,12 @@ const Settings: React.FC = () => {
               >
                 清除离线数据
               </Button>
-              <Button icon={<CloudUploadOutlined />}>
+              <Button
+                icon={<CloudUploadOutlined />}
+                onClick={handleSyncAllData}
+                disabled={isOffline || pendingCount === 0}
+                loading={dataSyncing}
+              >
                 上传所有数据
               </Button>
             </Space>

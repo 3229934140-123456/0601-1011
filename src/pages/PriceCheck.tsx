@@ -81,16 +81,40 @@ const PriceCheck: React.FC = () => {
 
   const handleAddRecord = () => {
     form.validateFields().then((values) => {
-      if (!scannedProduct || !selectedTask || !currentTaskData) return;
+      if (!selectedTask || !currentTaskData) {
+        message.warning('请先选择巡检任务');
+        return;
+      }
+
+      let productName: string;
+      let barcode: string;
+      let standardPrice: number;
+      let productId: string;
+
+      if (scannedProduct) {
+        productName = scannedProduct.name;
+        barcode = scannedProduct.barcode;
+        standardPrice = scannedProduct.standardPrice;
+        productId = scannedProduct.id;
+      } else {
+        if (!values.productName || !values.barcode || values.standardPrice === undefined) {
+          message.warning('请填写商品信息');
+          return;
+        }
+        productName = values.productName;
+        barcode = values.barcode;
+        standardPrice = values.standardPrice;
+        productId = `manual_${Date.now()}`;
+      }
 
       const newRecord: PriceCheckRecord = {
         id: `pr${Date.now()}`,
         taskId: selectedTask,
         storeId: currentTaskData.storeId,
-        productId: scannedProduct.id,
-        productName: scannedProduct.name,
-        barcode: scannedProduct.barcode,
-        standardPrice: scannedProduct.standardPrice,
+        productId,
+        productName,
+        barcode,
+        standardPrice,
         actualPrice: values.actualPrice,
         isCorrect: values.isCorrect,
         problemType: values.isCorrect ? undefined : values.problemType,
@@ -103,10 +127,7 @@ const PriceCheck: React.FC = () => {
       setScanModal(false);
       setSearchText('');
       setScannedProduct(null);
-
-      setTimeout(() => {
-        scanInputRef.current?.focus();
-      }, 100);
+      form.resetFields();
     });
   };
 
@@ -327,6 +348,39 @@ const PriceCheck: React.FC = () => {
         )}
 
         <Form form={form} layout="vertical">
+          {!scannedProduct && (
+            <>
+              <Form.Item
+                name="productName"
+                label="商品名称"
+                rules={[{ required: true, message: '请输入商品名称' }]}
+              >
+                <Input placeholder="请输入商品名称" />
+              </Form.Item>
+              <Form.Item
+                name="barcode"
+                label="商品条码"
+                rules={[{ required: true, message: '请输入商品条码' }]}
+              >
+                <Input placeholder="请输入商品条码" />
+              </Form.Item>
+              <Form.Item
+                name="standardPrice"
+                label="标准售价"
+                rules={[{ required: true, message: '请输入标准售价' }]}
+              >
+                <InputNumber
+                  style={{ width: '100%' }}
+                  min={0}
+                  step={0.01}
+                  precision={2}
+                  prefix="¥"
+                  placeholder="请输入标准售价"
+                />
+              </Form.Item>
+            </>
+          )}
+
           <Form.Item
             name="actualPrice"
             label="实际售价"
