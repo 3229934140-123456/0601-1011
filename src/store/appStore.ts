@@ -56,6 +56,7 @@ interface AppState {
   reports: InspectionReport[];
   currentTask: InspectionTask | null;
   currentStore: Store | null;
+  currentRectificationId: string | null;
   isOffline: boolean;
   pendingSyncIds: PendingSyncIds;
   lastSyncTime: string | null;
@@ -63,6 +64,7 @@ interface AppState {
 
   setCurrentTask: (task: InspectionTask | null) => void;
   setCurrentStore: (store: Store | null) => void;
+  setCurrentRectificationId: (id: string | null) => void;
   claimTask: (taskId: string, inspector: string) => void;
   updateTaskProgress: (taskId: string, progress: number) => void;
   completeTask: (taskId: string) => void;
@@ -160,6 +162,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   reports: initialState.reports || mockReports,
   currentTask: null,
   currentStore: null,
+  currentRectificationId: null,
   isOffline: initialState.isOffline || false,
   pendingSyncIds: initialState.pendingSyncIds || initialPendingSync,
   lastSyncTime: initialState.lastSyncTime || null,
@@ -167,6 +170,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setCurrentTask: (task) => set({ currentTask: task }),
   setCurrentStore: (store) => set({ currentStore: store }),
+  setCurrentRectificationId: (id) => set({ currentRectificationId: id }),
 
   claimTask: (taskId, inspector) => {
     set((state) => ({

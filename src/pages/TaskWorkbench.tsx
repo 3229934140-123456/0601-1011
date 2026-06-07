@@ -538,6 +538,52 @@ const TaskWorkbench: React.FC<TaskWorkbenchProps> = ({ task }) => {
           </Button>
         </Space>
       </div>
+
+      <Modal
+        title="确认完成巡检"
+        open={confirmModal}
+        onOk={confirmCompleteTask}
+        onCancel={() => setConfirmModal(false)}
+        okText="确认生成报告"
+        cancelText="取消"
+        width={520}
+      >
+        <Alert
+          message="确认生成巡检报告？"
+          description="生成报告后任务将标记为已完成，报告将自动同步到统计报表中。"
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        <Divider style={{ margin: '12px 0' }} />
+        <Descriptions column={2} size="small" bordered>
+          <Descriptions.Item label="门店名称" span={2}>{task.storeName}</Descriptions.Item>
+          <Descriptions.Item label="任务类型">
+            {task.type === 'price' ? '价格检查' : task.type === 'promotion' ? '促销核验' : '综合巡检'}
+          </Descriptions.Item>
+          <Descriptions.Item label="预计得分">
+            <span style={{ fontWeight: 600, color: totalScore >= 90 ? '#52c41a' : totalScore >= 70 ? '#faad14' : '#ff4d4f' }}>
+              {totalScore} 分
+            </span>
+          </Descriptions.Item>
+          <Descriptions.Item label="核价记录">{taskPriceRecords.length} 条</Descriptions.Item>
+          <Descriptions.Item label="促销核验">{taskPromotionRecords.length} 条</Descriptions.Item>
+          <Descriptions.Item label="照片证据">{taskPhotos.length} 张</Descriptions.Item>
+          <Descriptions.Item label="问题数量">
+            {taskPriceRecords.filter(r => !r.isCorrect).length + taskPromotionRecords.filter(r => !r.isCorrect).length} 个
+          </Descriptions.Item>
+          <Descriptions.Item label="整改项">{taskRectifications.length} 项</Descriptions.Item>
+        </Descriptions>
+        {todoList.some(t => t.status === 'warning') && (
+          <Alert
+            message="有待处理事项"
+            description={todoList.filter(t => t.status === 'warning').map(t => t.desc).join('；')}
+            type="warning"
+            showIcon
+            style={{ marginTop: 16 }}
+          />
+        )}
+      </Modal>
     </div>
   );
 };

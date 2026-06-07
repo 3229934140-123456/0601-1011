@@ -221,8 +221,8 @@ const Reports: React.FC = () => {
     
     const pending = relatedRects.filter((r) => r.status === 'pending').length;
     const processing = relatedRects.filter((r) => r.status === 'processing').length;
-    const reviewing = relatedRects.filter((r) => r.status === 'reviewing').length;
-    const completed = relatedRects.filter((r) => r.status === 'completed').length;
+    const reviewing = relatedRects.filter((r) => r.status === 'replied').length;
+    const completed = relatedRects.filter((r) => r.status === 'verified' || r.status === 'closed').length;
     
     const total = relatedRects.length;
     const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
@@ -273,7 +273,7 @@ const Reports: React.FC = () => {
           renderItem={(report) => {
             const storeRects = rectifications.filter((r) => r.taskId === report.taskId);
             const rectCount = storeRects.length;
-            const completedRects = storeRects.filter((r) => r.status === 'completed').length;
+            const completedRects = storeRects.filter((r) => r.status === 'verified' || r.status === 'closed').length;
             
             return (
               <List.Item
@@ -469,6 +469,13 @@ const Reports: React.FC = () => {
   };
 
   const handleExportAll = async () => {
+    const storeCount = storeScores.length;
+    const avgScore = storeCount > 0
+      ? Math.round(storeScores.reduce((sum, s) => sum + s.avgScore, 0) / storeCount)
+      : 0;
+    const excellentCount = storeScores.filter(s => s.avgScore >= 90).length;
+    const totalProblemCount = storeScores.reduce((sum, s) => sum + s.problemCount, 0);
+
     const htmlContent = `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -498,6 +505,7 @@ const Reports: React.FC = () => {
     .score-good { color: #52c41a; }
     .score-mid { color: #faad14; }
     .score-low { color: #ff4d4f; }
+    .empty { text-align: center; padding: 40px; color: #999; }
     .footer { text-align: center; color: #999; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e8e8e8; }
   </style>
 </head>
@@ -509,19 +517,19 @@ const Reports: React.FC = () => {
     <h2>整体概览</h2>
     <div class="stats">
       <div class="stat-item">
-        <div class="stat-num">${storeScores.length}</div>
+        <div class="stat-num">${storeCount}</div>
         <div class="stat-label">门店总数</div>
       </div>
       <div class="stat-item">
-        <div class="stat-num" style="color: #52c41a;">${storeScores.filter(s => s.avgScore >= 90).length}</div>
+        <div class="stat-num" style="color: #52c41a;">${excellentCount}</div>
         <div class="stat-label">优秀门店</div>
       </div>
       <div class="stat-item">
-        <div class="stat-num" style="color: #faad14;">${Math.round(storeScores.reduce((sum, s) => sum + s.avgScore, 0) / storeScores.length)}</div>
+        <div class="stat-num" style="color: #faad14;">${avgScore}</div>
         <div class="stat-label">区域平均分</div>
       </div>
       <div class="stat-item">
-        <div class="stat-num" style="color: #ff4d4f;">${storeScores.reduce((sum, s) => sum + s.problemCount, 0)}</div>
+        <div class="stat-num" style="color: #ff4d4f;">${totalProblemCount}</div>
         <div class="stat-label">累计问题数</div>
       </div>
     </div>
@@ -529,6 +537,7 @@ const Reports: React.FC = () => {
 
   <div class="section">
     <h2>门店排名</h2>
+    ${storeCount > 0 ? `
     <table>
       <thead>
         <tr>
@@ -559,10 +568,12 @@ const Reports: React.FC = () => {
         `).join('')}
       </tbody>
     </table>
+    ` : '<div class="empty">暂无门店数据</div>'}
   </div>
 
   <div class="section">
     <h2>巡检报告记录</h2>
+    ${filteredReports.length > 0 ? `
     <table>
       <thead>
         <tr>
@@ -591,6 +602,7 @@ const Reports: React.FC = () => {
         `).join('')}
       </tbody>
     </table>
+    ` : '<div class="empty">暂无巡检报告</div>'}
   </div>
 
   <div class="footer">
@@ -1188,8 +1200,12 @@ const Reports: React.FC = () => {
                                 title={item.productName || item.productId}
                                 description={
                                   <span>
-                                    促销价：¥{item.promotionPrice} / 实际价：¥{item.actualPrice}
-                                    {item.issueType && ` · ${item.issueType}`}
+                                    促销价：¥{item.expectedPrice} / 实际价：¥{item.actualPrice}
+                                    {item.promotionType && ` · ${item.promotionType}`}
+                                    {!item.isDisplayed && ' · 无促销标识'}
+                                    {item.remark && (
+                                      <><br /><span style={{ color: '#999' }}>备注：{item.remark}</span></>
+                                    )}
                                   </span>
                                 }
                               />
@@ -1283,18 +1299,20 @@ const Reports: React.FC = () => {
                                     setDetailModal(false);
                                   }}
                                 >
-                                  查看详情
+                                  跳转跟踪
                                 </Button>
                               ]}
                             >
                               <List.Item.Meta
                                 avatar={
                                   <Tag color={
-                                    item.status === 'completed' ? 'green' :
+                                    item.status === 'completed' || item.status === 'verified' || item.status === 'closed' ? 'green' :
                                     item.status === 'pending' ? 'red' :
                                     item.status === 'processing' ? 'orange' : 'blue'
                                   }>
                                     {item.status === 'completed' ? '已完成' :
+                                     item.status === 'verified' ? '已复核' :
+                                     item.status === 'closed' ? '已关闭' :
                                      item.status === 'pending' ? '待处理' :
                                      item.status === 'processing' ? '处理中' : '待复核'}
                                   </Tag>
@@ -1302,7 +1320,7 @@ const Reports: React.FC = () => {
                                 title={item.title}
                                 description={
                                   <span>
-                                    负责人：{item.responsiblePerson} · 期限：{item.deadline}
+                                    负责人：{item.assignee} · 期限：{item.deadline}
                                   </span>
                                 }
                               />

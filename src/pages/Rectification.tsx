@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Card,
   Row,
@@ -39,7 +39,18 @@ const { Option } = Select;
 const { TextArea } = Input;
 
 const Rectification: React.FC = () => {
-  const { rectifications, addRectification, updateRectification, replyRectification, verifyRectification, stores, tasks, user } = useAppStore();
+  const {
+    rectifications,
+    addRectification,
+    updateRectification,
+    replyRectification,
+    verifyRectification,
+    stores,
+    tasks,
+    user,
+    currentRectificationId,
+    setCurrentRectificationId
+  } = useAppStore();
   const [activeTab, setActiveTab] = useState('all');
   const [createModal, setCreateModal] = useState(false);
   const [detailModal, setDetailModal] = useState(false);
@@ -106,6 +117,20 @@ const Rectification: React.FC = () => {
       setCreateModal(false);
     });
   };
+
+  useEffect(() => {
+    if (currentRectificationId) {
+      const item = rectifications.find((r) => r.id === currentRectificationId);
+      if (item) {
+        setSelectedItem(item);
+        setDetailModal(true);
+        if (item.status !== 'all') {
+          setActiveTab(item.status);
+        }
+      }
+      setCurrentRectificationId(null);
+    }
+  }, [currentRectificationId, rectifications, setCurrentRectificationId]);
 
   const handleViewDetail = (item: RectificationItem) => {
     setSelectedItem(item);
