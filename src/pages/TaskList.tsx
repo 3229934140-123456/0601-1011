@@ -26,12 +26,14 @@ import {
 import { useAppStore } from '../store/appStore';
 import { InspectionTask } from '../types';
 import dayjs from 'dayjs';
+import { useNavigate } from 'react-router-dom';
 
 const { TabPane } = Tabs;
 const { Option } = Select;
 
 const TaskList: React.FC = () => {
   const { tasks, user, claimTask, setCurrentTask } = useAppStore();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('all');
   const [claimModal, setClaimModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState<InspectionTask | null>(null);
@@ -82,13 +84,17 @@ const TaskList: React.FC = () => {
   const handleConfirmClaim = () => {
     if (selectedTask) {
       claimTask(selectedTask.id, user.name);
+      const updatedTask = { ...selectedTask, status: 'in_progress' as const, inspector: user.name };
+      setCurrentTask(updatedTask);
       setClaimModal(false);
       setSelectedTask(null);
+      navigate('/task-workbench');
     }
   };
 
   const handleStartTask = (task: InspectionTask) => {
     setCurrentTask(task);
+    navigate('/task-workbench');
   };
 
   const stats = [

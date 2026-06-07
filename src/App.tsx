@@ -19,6 +19,7 @@ import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from './store/appStore';
 import StoreList from './pages/StoreList';
 import TaskList from './pages/TaskList';
+import TaskWorkbench from './pages/TaskWorkbench';
 import PriceCheck from './pages/PriceCheck';
 import PromotionCheck from './pages/PromotionCheck';
 import PhotoEvidence from './pages/PhotoEvidence';
@@ -27,6 +28,18 @@ import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 
 const { Header, Sider, Content } = Layout;
+
+const TaskWorkbenchWrapper: React.FC = () => {
+  const { currentTask } = useAppStore();
+  const navigate = useNavigate();
+
+  if (!currentTask) {
+    navigate('/tasks');
+    return null;
+  }
+
+  return <TaskWorkbench task={currentTask} />;
+};
 
 const App: React.FC = () => {
   const navigate = useNavigate();
@@ -172,6 +185,7 @@ const App: React.FC = () => {
             <Route path="/" element={<TaskList />} />
             <Route path="/stores" element={<StoreList />} />
             <Route path="/tasks" element={<TaskList />} />
+            <Route path="/task-workbench" element={<TaskWorkbenchWrapper />} />
             <Route path="/price-check" element={<PriceCheck />} />
             <Route path="/promotion-check" element={<PromotionCheck />} />
             <Route path="/photos" element={<PhotoEvidence />} />

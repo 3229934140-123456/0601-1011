@@ -52,6 +52,15 @@ ipcMain.handle('save-file', async (event, { defaultPath, filters }) => {
   return result;
 });
 
+ipcMain.handle('write-file', async (event, { filePath, content }) => {
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { success: true, filePath };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });

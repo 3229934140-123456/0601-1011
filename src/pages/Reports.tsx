@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Card,
   Row,
@@ -30,6 +30,7 @@ import {
 import { useAppStore } from '../store/appStore';
 import { InspectionReport, Store } from '../types';
 import dayjs from 'dayjs';
+import { exportFile } from '../utils/electron';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
@@ -37,32 +38,99 @@ const { RangePicker } = DatePicker;
 const Reports: React.FC = () => {
   const { reports, stores, rectifications, tasks, user } = useAppStore();
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  const [selectedStore, setSelectedStore] = useState<string>('all');
+  const [selectedRoute, setSelectedRoute] = useState<string>('all');
   const [detailModal, setDetailModal] = useState(false);
   const [selectedReport, setSelectedReport] = useState<InspectionReport | null>(null);
 
-  const storeScores = stores.map((store) => {
-    const storeReports = reports.filter((r) => r.storeId === store.id);
-    const avgScore = storeReports.length > 0
-      ? storeReports.reduce((sum, r) => sum + r.totalScore, 0) / storeReports.length
-      : store.score;
-    const problemCount = storeReports.reduce((sum, r) => sum + r.problemCount, 0);
-    const rectCount = rectifications.filter((r) => r.storeId === store.id).length;
+  const routes = useMemo(() => {
+    const routeSet = new Set(stores.map((s) => s.route));
+    return Array.from(routeSet);
+  }, [stores]);
 
-    return {
-      ...store,
-      avgScore: Math.round(avgScore),
-      problemCount,
-      rectCount,
-      reportCount: storeReports.length
-    };
-  }).sort((a, b) => b.avgScore - a.avgScore);
+  const filteredReports = useMemo(() => {
+    return reports.filter((report) => {
+      if (selectedStore !== 'all' && report.storeId !== selectedStore) {
+        return false;
+      }
+      if (selectedRoute !== 'all') {
+        const store = stores.find((s) => s.id === report.storeId);
+        if (!store || store.route !== selectedRoute) {
+          return false;
+        }
+      }
+      if (dateRange && dateRange[0] && dateRange[1]) {
+        const reportDate = dayjs(report.inspectionDate);
+        if (reportDate.isBefore(dateRange[0], 'day') || reportDate.isAfter(dateRange[1], 'day')) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [reports, stores, selectedStore, selectedRoute, dateRange]);
+
+  const filteredStores = useMemo(() => {
+    return stores.filter((store) => {
+      if (selectedRoute !== 'all' && store.route !== selectedRoute) {
+        return false;
+      }
+      if (selectedStore !== 'all' && store.id !== selectedStore) {
+        return false;
+      }
+      return true;
+    });
+  }, [stores, selectedStore, selectedRoute]);
+
+  const storeScores = useMemo(() => {
+    return filteredStores.map((store) => {
+      const storeReports = filteredReports.filter((r) => r.storeId === store.id);
+      const avgScore = storeReports.length > 0
+        ? storeReports.reduce((sum, r) => sum + r.totalScore, 0) / storeReports.length
+        : store.score;
+      const problemCount = storeReports.reduce((sum, r) => sum + r.problemCount, 0);
+      const rectCount = rectifications.filter((r) => r.storeId === store.id).length;
+
+      return {
+        ...store,
+        avgScore: Math.round(avgScore),
+        problemCount,
+        rectCount,
+        reportCount: storeReports.length
+      };
+    }).sort((a, b) => b.avgScore - a.avgScore);
+  }, [filteredStores, filteredReports, rectifications]);
+
+  const avgTotalScore = useMemo(() => {
+    return storeScores.length > 0
+      ? Math.round(storeScores.reduce((sum, s) => sum + s.avgScore, 0) / storeScores.length)
+      : 0;
+  }, [storeScores]);
+
+  const totalProblems = useMemo(() => {
+    return storeScores.reduce((sum, s) => sum + s.problemCount, 0);
+  }, [storeScores]);
+
+  const totalRects = useMemo(() => {
+    return storeScores.reduce((sum, s) => sum + s.rectCount, 0);
+  }, [storeScores]);
+
+  const completedTasks = useMemo(() => {
+    let filteredTaskIds = new Set<string>();
+    if (selectedStore !== 'all' || selectedRoute !== 'all' || dateRange) {
+      filteredReports.forEach((r) => {
+        if (r.taskId) filteredTaskIds.add(r.taskId);
+      });
+      return filteredTaskIds.size;
+    }
+    return tasks.filter((t) => t.status === 'completed').length;
+  }, [tasks, filteredReports, selectedStore, selectedRoute, dateRange]);
 
   const handleViewDetail = (report: InspectionReport) => {
     setSelectedReport(report);
     setDetailModal(true);
   };
 
-  const handleExportReport = (report: InspectionReport) => {
+  const handleExportReport = async (report: InspectionReport) => {
     const store = stores.find((s) => s.id === report.storeId);
     const rank = storeScores.findIndex((s) => s.id === report.storeId) + 1;
 
@@ -190,19 +258,16 @@ const Reports: React.FC = () => {
 </body>
 </html>`;
 
-    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${report.storeName}_巡检报告_${report.inspectionDate}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    message.success('报告导出成功');
+    const success = await exportFile(
+      `${report.storeName}_巡检报告_${report.inspectionDate}.html`,
+      htmlContent
+    );
+    if (success) {
+      message.success('报告导出成功');
+    }
   };
 
-  const handleExportAll = () => {
+  const handleExportAll = async () => {
     const htmlContent = `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -311,7 +376,7 @@ const Reports: React.FC = () => {
         </tr>
       </thead>
       <tbody>
-        ${reports.map(r => `
+        ${filteredReports.map(r => `
           <tr>
             <td>${r.storeName}</td>
             <td>${r.inspectionDate}</td>
@@ -333,16 +398,13 @@ const Reports: React.FC = () => {
 </body>
 </html>`;
 
-    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${user.area}_区域巡检汇总报告_${dayjs().format('YYYYMMDD')}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    message.success('汇总报告导出成功');
+    const success = await exportFile(
+      `${user.area}_区域巡检汇总报告_${dayjs().format('YYYYMMDD')}.html`,
+      htmlContent
+    );
+    if (success) {
+      message.success('汇总报告导出成功');
+    }
   };
 
   const getScoreColor = (score: number) => {
@@ -510,18 +572,35 @@ const Reports: React.FC = () => {
     }
   ];
 
-  const avgTotalScore = storeScores.length > 0
-    ? Math.round(storeScores.reduce((sum, s) => sum + s.avgScore, 0) / storeScores.length)
-    : 0;
-  const totalProblems = storeScores.reduce((sum, s) => sum + s.problemCount, 0);
-  const totalRects = storeScores.reduce((sum, s) => sum + s.rectCount, 0);
-  const completedTasks = tasks.filter((t) => t.status === 'completed').length;
-
   return (
     <div className="page-container">
       <div className="page-header">
         <h2 className="page-title">统计报表</h2>
         <Space>
+          <Select
+            value={selectedRoute}
+            onChange={setSelectedRoute}
+            style={{ width: 140 }}
+            placeholder="选择路线"
+          >
+            <Option value="all">全部路线</Option>
+            {routes.map((route) => (
+              <Option key={route} value={route}>{route}</Option>
+            ))}
+          </Select>
+          <Select
+            value={selectedStore}
+            onChange={setSelectedStore}
+            style={{ width: 180 }}
+            placeholder="选择门店"
+            showSearch
+            optionFilterProp="children"
+          >
+            <Option value="all">全部门店</Option>
+            {filteredStores.map((store) => (
+              <Option key={store.id} value={store.id}>{store.name}</Option>
+            ))}
+          </Select>
           <RangePicker
             value={dateRange}
             onChange={(dates) => setDateRange(dates as any)}
@@ -600,7 +679,7 @@ const Reports: React.FC = () => {
       >
         <Table
           columns={reportColumns}
-          dataSource={reports}
+          dataSource={filteredReports}
           rowKey="id"
           pagination={{ pageSize: 10 }}
         />

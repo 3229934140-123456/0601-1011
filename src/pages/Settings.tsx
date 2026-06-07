@@ -37,7 +37,7 @@ import { mockProducts } from '../data/mockData';
 const { Option } = Select;
 
 const Settings: React.FC = () => {
-  const { user, products, setOffline, isOffline, syncProducts, pendingSyncIds, syncAllData, getPendingSyncCount, resetAllData, priceRecords, promotionRecords, photos, rectifications } = useAppStore();
+  const { user, products, setOffline, isOffline, syncProducts, pendingSyncIds, syncAllData, getPendingSyncCount, getSyncStatus, resetAllData, priceRecords, promotionRecords, photos, rectifications, lastSyncTime } = useAppStore();
   const [form] = Form.useForm();
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
@@ -53,6 +53,14 @@ const Settings: React.FC = () => {
     { label: '照片证据', count: pendingSyncIds.photos.length },
     { label: '整改记录', count: pendingSyncIds.rectifications.length }
   ], [pendingSyncIds]);
+
+  const syncStatus = useMemo(() => getSyncStatus(), [pendingSyncIds, priceRecords, promotionRecords, photos, rectifications]);
+
+  const formattedLastSyncTime = useMemo(() => {
+    if (!lastSyncTime) return '从未同步';
+    const date = new Date(lastSyncTime);
+    return date.toLocaleString('zh-CN');
+  }, [lastSyncTime]);
 
   const handleSyncAllData = async () => {
     if (isOffline) {
@@ -201,69 +209,99 @@ const Settings: React.FC = () => {
               />
             )}
 
-            <List
-              size="large"
-              dataSource={[
-                {
-                  title: '离线模式',
-                  desc: '开启后数据暂存本地，联网后手动同步',
-                  action: (
-                    <Switch checked={isOffline} onChange={handleToggleOffline} />
-                  ),
-                  icon: isOffline ? <DisconnectOutlined style={{ color: '#ff4d4f' }} /> : <WifiOutlined style={{ color: '#52c41a' }} />
-                },
-                {
-                  title: '待同步数据',
-                  desc: pendingBreakdown.map(item => `${item.label}: ${item.count}条`).join('  |  '),
-                  action: (
-                    <Button
-                      type="primary"
-                      icon={<CloudUploadOutlined />}
-                      onClick={handleSyncAllData}
-                      loading={dataSyncing}
-                      disabled={isOffline || pendingCount === 0}
-                    >
-                      同步所有数据
-                    </Button>
-                  ),
-                  icon: <DatabaseOutlined />
-                },
-                {
-                  title: '商品清单同步',
-                  desc: `当前版本：2024-01-15 · 共 ${products.length} 个商品`,
-                  action: (
-                    <Button
-                      icon={<CloudDownloadOutlined />}
-                      onClick={handleSyncProducts}
-                      loading={syncing}
-                    >
-                      同步
-                    </Button>
-                  ),
-                  icon: <FileTextOutlined />
-                },
-                {
-                  title: '门店基础数据',
-                  desc: '上次同步：2024-01-20 10:30',
-                  action: (
-                    <Button icon={<CloudDownloadOutlined />}>同步</Button>
-                  ),
-                  icon: <FileTextOutlined />
-                }
-              ]}
-              renderItem={(item) => (
-                <List.Item
-                  actions={[item.action]}
-                  style={{ padding: '16px 0' }}
-                >
-                  <List.Item.Meta
-                    avatar={<span style={{ fontSize: 24 }}>{item.icon}</span>}
-                    title={item.title}
-                    description={<span style={{ color: '#999' }}>{item.desc}</span>}
-                  />
-                </List.Item>
-              )}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {isOffline ? <DisconnectOutlined style={{ color: '#ff4d4f', fontSize: 20 }} /> : <WifiOutlined style={{ color: '#52c41a', fontSize: 20 }} />}
+                <div>
+                  <div style={{ fontWeight: 500 }}>离线模式</div>
+                  <div style={{ fontSize: 12, color: '#999' }}>开启后数据暂存本地，联网后手动同步</div>
+                </div>
+              </div>
+              <Switch checked={isOffline} onChange={handleToggleOffline} />
+            </div>
+
+            <div style={{ padding: '16px 0', borderBottom: '1px solid #f0f0f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <span style={{ fontWeight: 500 }}>同步状态</span>
+                <span style={{ fontSize: 12, color: '#999' }}>最后同步：{formattedLastSyncTime}</span>
+              </div>
+              <List
+                size="small"
+                dataSource={syncStatus}
+                renderItem={(item) => (
+                  <List.Item style={{ padding: '8px 0' }}>
+                    <List.Item.Meta
+                      title={
+                        <span style={{ fontSize: 13 }}>
+                          {item.type}
+                          <Tag
+                            color={item.status === 'synced' ? 'green' : 'orange'}
+                            style={{ marginLeft: 8 }}
+                          >
+                            {item.status === 'synced' ? '已同步' : `${item.pending} 条待同步`}
+                          </Tag>
+                        </span>
+                      }
+                      description={<span style={{ fontSize: 12, color: '#999' }}>共 {item.total} 条</span>}
+                    />
+                    <Progress
+                      percent={item.total > 0 ? Math.round(((item.total - item.pending) / item.total) * 100) : 100}
+                      size="small"
+                      showInfo={false}
+                      style={{ width: 100 }}
+                      strokeColor={item.status === 'synced' ? '#52c41a' : '#faad14'}
+                    />
+                  </List.Item>
+                )}
+              />
+              <Button
+                type="primary"
+                icon={<CloudUploadOutlined />}
+                onClick={handleSyncAllData}
+                loading={dataSyncing}
+                disabled={isOffline || pendingCount === 0}
+                block
+                style={{ marginTop: 12 }}
+              >
+                {pendingCount > 0 ? `同步所有数据（${pendingCount}条待同步）` : '数据已全部同步'}
+              </Button>
+            </div>
+
+            <div style={{ padding: '16px 0' }}>
+              <div style={{ fontWeight: 500, marginBottom: 12 }}>基础数据同步</div>
+              <List
+                size="small"
+                dataSource={[
+                  {
+                    title: '商品清单',
+                    desc: `当前版本：2024-01-15 · 共 ${products.length} 个商品`,
+                    action: (
+                      <Button
+                        icon={<CloudDownloadOutlined />}
+                        onClick={handleSyncProducts}
+                        loading={syncing}
+                        size="small"
+                      >
+                        同步
+                      </Button>
+                    )
+                  },
+                  {
+                    title: '门店基础数据',
+                    desc: '上次同步：2024-01-20 10:30',
+                    action: <Button icon={<CloudDownloadOutlined />} size="small">同步</Button>
+                  }
+                ]}
+                renderItem={(item) => (
+                  <List.Item actions={[item.action]}>
+                    <List.Item.Meta
+                      title={<span style={{ fontSize: 13 }}>{item.title}</span>}
+                      description={<span style={{ fontSize: 12, color: '#999' }}>{item.desc}</span>}
+                    />
+                  </List.Item>
+                )}
+              />
+            </div>
 
             {syncing && (
               <div style={{ marginTop: 16 }}>
