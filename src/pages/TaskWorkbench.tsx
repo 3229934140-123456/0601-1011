@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Card,
   Row,
@@ -11,7 +11,9 @@ import {
   Space,
   Statistic,
   List,
-  message
+  message,
+  Modal,
+  Alert
 } from 'antd';
 import {
   ShopOutlined,
@@ -22,7 +24,9 @@ import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
   PlayCircleOutlined,
-  CalendarOutlined
+  CalendarOutlined,
+  WarningOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/appStore';
@@ -43,8 +47,11 @@ const TaskWorkbench: React.FC<TaskWorkbenchProps> = ({ task }) => {
     rectifications,
     products,
     completeTask,
-    addReport
+    addReport,
+    setCurrentTask
   } = useAppStore();
+
+  const [confirmModal, setConfirmModal] = useState(false);
 
   const store = stores.find((s) => s.id === task.storeId);
 
@@ -95,39 +102,150 @@ const TaskWorkbench: React.FC<TaskWorkbenchProps> = ({ task }) => {
     let completed = 0;
 
     if (task.type === 'price' || task.type === 'comprehensive') {
-      total += 40;
-      completed += priceProgress * 0.4;
+      total += 50;
+      completed += priceProgress * 0.5;
     }
     if (task.type === 'promotion' || task.type === 'comprehensive') {
-      total += 40;
-      completed += promotionProgress * 0.4;
+      total += 30;
+      completed += promotionProgress * 0.3;
     }
     total += 20;
-    completed += Math.min(taskPhotos.length * 2, 20);
+    completed += Math.min(taskPhotos.length * 4, 20);
 
     return total > 0 ? Math.round(completed) : 0;
   }, [task.type, priceProgress, promotionProgress, taskPhotos.length]);
 
   const priceScore = taskPriceRecords.length > 0
-    ? Math.round(100 - ((taskPriceRecords.length - priceCorrectCount) * 2))
+    ? Math.max(0, Math.round(100 - ((taskPriceRecords.length - priceCorrectCount) * 2)))
     : 100;
 
   const promotionScore = taskPromotionRecords.length > 0
-    ? Math.round(100 - ((taskPromotionRecords.length - promotionCorrectCount) * 3))
+    ? Math.max(0, Math.round(100 - ((taskPromotionRecords.length - promotionCorrectCount) * 3)))
     : 100;
 
-  const totalScore = Math.round((priceScore + promotionScore) / 2);
+  const totalScore = useMemo(() => {
+    if (task.type === 'price') {
+      return priceScore;
+    } else if (task.type === 'promotion') {
+      return promotionScore;
+    } else {
+      return Math.round((priceScore + promotionScore) / 2);
+    }
+  }, [task.type, priceScore, promotionScore]);
+
+  const todoList = useMemo(() => {
+    const todos: { title: string; status: 'done' | 'warning' | 'info'; desc: string }[] = [];
+
+    if (task.type === 'price' || task.type === 'comprehensive') {
+      if (taskPriceRecords.length === 0) {
+        todos.push({
+          title: '完成商品核价',
+          status: 'warning',
+          desc: '尚未核价任何商品'
+        });
+      } else if (taskPriceRecords.length < 10) {
+        todos.push({
+          title: '增加核价数量',
+          status: 'info',
+          desc: `已核价 ${taskPriceRecords.length} 条，建议至少10条`
+        });
+      } else {
+        todos.push({
+          title: '商品核价',
+          status: 'done',
+          desc: `已核价 ${taskPriceRecords.length} 条，正确率 ${priceAccuracy}%`
+        });
+      }
+    }
+
+    if (task.type === 'promotion' || task.type === 'comprehensive') {
+      if (taskPromotionRecords.length === 0) {
+        todos.push({
+          title: '完成促销核验',
+          status: 'warning',
+          desc: '尚未核验任何促销商品'
+        });
+      } else if (taskPromotionRecords.length < 3) {
+        todos.push({
+          title: '增加促销核验数量',
+          status: 'info',
+          desc: `已核验 ${taskPromotionRecords.length} 条，建议至少3条`
+        });
+      } else {
+        todos.push({
+          title: '促销核验',
+          status: 'done',
+          desc: `已核验 ${taskPromotionRecords.length} 条，合规率 ${promotionAccuracy}%`
+        });
+      }
+    }
+
+    if (taskPhotos.length === 0) {
+      todos.push({
+        title: '上传现场照片',
+        status: 'warning',
+        desc: '建议至少上传1张现场照片作为证据'
+      });
+    } else {
+      todos.push({
+        title: '照片证据',
+        status: 'done',
+        desc: `已上传 ${taskPhotos.length} 张照片`
+      });
+    }
+
+    const pendingRects = taskRectifications.filter((r) => r.status === 'pending');
+    if (pendingRects.length > 0) {
+      todos.push({
+        title: '处理待分配整改项',
+        status: 'warning',
+        desc: `有 ${pendingRects.length} 个整改项待分配负责人`
+      });
+    }
+
+    const abnormalCount = taskPriceRecords.filter(r => !r.isCorrect).length + 
+                          taskPromotionRecords.filter(r => !r.isCorrect).length;
+    if (abnormalCount > 0 && taskRectifications.length === 0) {
+      todos.push({
+        title: '创建整改项',
+        status: 'info',
+        desc: `发现 ${abnormalCount} 个问题，建议创建整改项跟进`
+      });
+    }
+
+    if (todos.every((t) => t.status === 'done')) {
+      todos.push({
+        title: '巡检已准备完成',
+        status: 'done',
+        desc: '所有检查项已完成，可以提交报告'
+      });
+    }
+
+    return todos;
+  }, [task.type, taskPriceRecords.length, taskPromotionRecords.length, taskPhotos.length, taskRectifications, priceAccuracy, promotionAccuracy]);
+
+  const canComplete = useMemo(() => {
+    const hasCheckRecords = task.type === 'price' 
+      ? taskPriceRecords.length > 0
+      : task.type === 'promotion'
+      ? taskPromotionRecords.length > 0
+      : taskPriceRecords.length > 0 || taskPromotionRecords.length > 0;
+    return hasCheckRecords;
+  }, [task.type, taskPriceRecords.length, taskPromotionRecords.length]);
 
   const handleBack = () => {
     navigate('/tasks');
   };
 
   const handleCompleteTask = () => {
-    if (taskPriceRecords.length === 0 && taskPromotionRecords.length === 0) {
+    if (!canComplete) {
       message.warning('请至少完成一项检查后再提交');
       return;
     }
+    setConfirmModal(true);
+  };
 
+  const confirmCompleteTask = () => {
     const newReport = {
       id: `rpt${Date.now()}`,
       storeId: task.storeId,
@@ -144,39 +262,49 @@ const TaskWorkbench: React.FC<TaskWorkbenchProps> = ({ task }) => {
 
     addReport(newReport);
     completeTask(task.id);
+    setConfirmModal(false);
     message.success('巡检完成，报告已生成');
     navigate('/reports');
   };
 
-  const quickActions = [
-    {
-      key: 'price',
-      title: '商品核价',
-      icon: <ScanOutlined />,
-      count: taskPriceRecords.length,
-      progress: priceProgress,
-      color: '#1677ff',
-      path: '/price-check'
-    },
-    {
-      key: 'promotion',
-      title: '促销核验',
-      icon: <TagsOutlined />,
-      count: taskPromotionRecords.length,
-      progress: promotionProgress,
-      color: '#722ed1',
-      path: '/promotion-check'
-    },
-    {
+  const quickActions = useMemo(() => {
+    const actions: any[] = [];
+
+    if (task.type === 'price' || task.type === 'comprehensive') {
+      actions.push({
+        key: 'price',
+        title: '商品核价',
+        icon: <ScanOutlined />,
+        count: taskPriceRecords.length,
+        progress: priceProgress,
+        color: '#1677ff',
+        path: '/price-check'
+      });
+    }
+
+    if (task.type === 'promotion' || task.type === 'comprehensive') {
+      actions.push({
+        key: 'promotion',
+        title: '促销核验',
+        icon: <TagsOutlined />,
+        count: taskPromotionRecords.length,
+        progress: promotionProgress,
+        color: '#722ed1',
+        path: '/promotion-check'
+      });
+    }
+
+    actions.push({
       key: 'photos',
       title: '拍照取证',
       icon: <CameraOutlined />,
       count: taskPhotos.length,
-      progress: Math.min(taskPhotos.length * 5, 100),
+      progress: Math.min(taskPhotos.length * 4, 100),
       color: '#faad14',
       path: '/photos'
-    },
-    {
+    });
+
+    actions.push({
       key: 'rectification',
       title: '整改跟踪',
       icon: <ToolOutlined />,
@@ -184,8 +312,10 @@ const TaskWorkbench: React.FC<TaskWorkbenchProps> = ({ task }) => {
       progress: taskRectifications.length > 0 ? 100 : 0,
       color: '#ff4d4f',
       path: '/rectification'
-    }
-  ];
+    });
+
+    return actions;
+  }, [task.type, taskPriceRecords.length, taskPromotionRecords.length, taskPhotos.length, taskRectifications.length, priceProgress, promotionProgress]);
 
   const isOverdue = dayjs().isAfter(dayjs(task.deadline)) && task.status !== 'completed';
 
@@ -355,61 +485,39 @@ const TaskWorkbench: React.FC<TaskWorkbenchProps> = ({ task }) => {
         </Col>
         <Col span={8}>
           <Card
-            title={<span><CheckCircleOutlined style={{ marginRight: 8, color: '#52c41a' }} />实时评分</span>}
+            title={<span><CheckCircleOutlined style={{ marginRight: 8, color: '#52c41a' }} />待办清单</span>}
             className="card-section"
           >
-            <div style={{ textAlign: 'center', marginBottom: 20 }}>
-              <div style={{ fontSize: 48, fontWeight: 700, color: totalScore >= 90 ? '#52c41a' : totalScore >= 70 ? '#faad14' : '#ff4d4f' }}>
+            <div style={{ textAlign: 'center', marginBottom: 12, padding: '8px 0', background: '#f9f9f9', borderRadius: 6 }}>
+              <span style={{ fontSize: 12, color: '#999' }}>预计得分</span>
+              <span style={{ fontSize: 28, fontWeight: 700, marginLeft: 8, color: totalScore >= 90 ? '#52c41a' : totalScore >= 70 ? '#faad14' : '#ff4d4f' }}>
                 {totalScore}
-              </div>
-              <div style={{ color: '#666', fontSize: 13 }}>综合得分（满分100）</div>
+              </span>
               <Tag
                 color={totalScore >= 90 ? 'green' : totalScore >= 80 ? 'blue' : totalScore >= 70 ? 'orange' : 'red'}
-                style={{ marginTop: 8 }}
+                style={{ marginLeft: 6 }}
               >
                 {totalScore >= 90 ? '优秀' : totalScore >= 80 ? '良好' : totalScore >= 70 ? '合格' : '不合格'}
               </Tag>
             </div>
 
-            <Divider style={{ margin: '12px 0' }} />
-
-            <Row gutter={8}>
-              <Col span={12}>
-                <Statistic
-                  title="价格得分"
-                  value={priceScore}
-                  valueStyle={{ fontSize: 20, color: priceScore >= 90 ? '#52c41a' : '#ff4d4f' }}
-                  suffix="分"
-                />
-              </Col>
-              <Col span={12}>
-                <Statistic
-                  title="促销得分"
-                  value={promotionScore}
-                  valueStyle={{ fontSize: 20, color: promotionScore >= 90 ? '#52c41a' : '#ff4d4f' }}
-                  suffix="分"
-                />
-              </Col>
-            </Row>
-
-            <Divider style={{ margin: '12px 0' }} />
-
-            <div style={{ fontSize: 13, color: '#666' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span>价格正确率</span>
-                <span style={{ fontWeight: 500 }}>{priceAccuracy}%</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span>促销合规率</span>
-                <span style={{ fontWeight: 500 }}>{promotionAccuracy}%</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>发现问题数</span>
-                <span style={{ fontWeight: 500, color: '#ff4d4f' }}>
-                  {taskPriceRecords.filter(r => !r.isCorrect).length + taskPromotionRecords.filter(r => !r.isCorrect).length} 个
-                </span>
-              </div>
-            </div>
+            <List
+              size="small"
+              dataSource={todoList}
+              renderItem={(item) => (
+                <List.Item style={{ padding: '8px 0' }}>
+                  <List.Item.Meta
+                    avatar={
+                      item.status === 'done' ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 18 }} /> :
+                      item.status === 'warning' ? <WarningOutlined style={{ color: '#faad14', fontSize: 18 }} /> :
+                      <InfoCircleOutlined style={{ color: '#1677ff', fontSize: 18 }} />
+                    }
+                    title={<span style={{ fontSize: 13, fontWeight: 500 }}>{item.title}</span>}
+                    description={<span style={{ fontSize: 12, color: '#999' }}>{item.desc}</span>}
+                  />
+                </List.Item>
+              )}
+            />
           </Card>
         </Col>
       </Row>

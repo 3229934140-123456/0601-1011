@@ -32,6 +32,18 @@ interface PendingSyncIds {
   [key: string]: string[];
 }
 
+interface SyncLog {
+  id: string;
+  syncTime: string;
+  result: 'success' | 'failed';
+  totalCount: number;
+  details: {
+    type: string;
+    count: number;
+  }[];
+  errorMessage?: string;
+}
+
 interface AppState {
   user: User;
   stores: Store[];
@@ -47,6 +59,7 @@ interface AppState {
   isOffline: boolean;
   pendingSyncIds: PendingSyncIds;
   lastSyncTime: string | null;
+  syncLogs: SyncLog[];
 
   setCurrentTask: (task: InspectionTask | null) => void;
   setCurrentStore: (store: Store | null) => void;
@@ -65,7 +78,13 @@ interface AppState {
   setOffline: (offline: boolean) => void;
   syncAllData: () => Promise<boolean>;
   getPendingSyncCount: () => number;
-  getSyncStatus: () => { type: string; pending: number; total: number; status: 'synced' | 'pending' }[];
+  getSyncStatus: () => { type: string; key: string; pending: number; total: number; status: 'synced' | 'pending' }[];
+  getPendingSyncDetails: () => {
+    priceRecords: PriceCheckRecord[];
+    promotionRecords: PromotionCheckRecord[];
+    photos: PhotoEvidence[];
+    rectifications: RectificationItem[];
+  };
   resetAllData: () => void;
 }
 
@@ -92,7 +111,8 @@ const saveToStorage = (state: Partial<AppState>) => {
       tasks: state.tasks,
       isOffline: state.isOffline,
       pendingSyncIds: state.pendingSyncIds,
-      lastSyncTime: state.lastSyncTime
+      lastSyncTime: state.lastSyncTime,
+      syncLogs: state.syncLogs
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
   } catch (e) {
@@ -119,7 +139,8 @@ const getInitialState = (): Partial<AppState> => {
       tasks: stored.tasks || mockTasks,
       isOffline: stored.isOffline || false,
       pendingSyncIds: stored.pendingSyncIds || initialPendingSync,
-      lastSyncTime: stored.lastSyncTime || null
+      lastSyncTime: stored.lastSyncTime || null,
+      syncLogs: stored.syncLogs || []
     };
   }
   return {};
@@ -142,6 +163,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isOffline: initialState.isOffline || false,
   pendingSyncIds: initialState.pendingSyncIds || initialPendingSync,
   lastSyncTime: initialState.lastSyncTime || null,
+  syncLogs: initialState.syncLogs || [],
 
   setCurrentTask: (task) => set({ currentTask: task }),
   setCurrentStore: (store) => set({ currentStore: store }),
@@ -310,6 +332,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const now = new Date().toISOString();
+    const pendingIds = state.pendingSyncIds;
+    const totalCount = (
+      pendingIds.priceRecords.length +
+      pendingIds.promotionRecords.length +
+      pendingIds.photos.length +
+      pendingIds.rectifications.length
+    );
+
+    const syncLog: SyncLog = {
+      id: `log${Date.now()}`,
+      syncTime: now,
+      result: 'success',
+      totalCount,
+      details: [
+        { type: '核价记录', count: pendingIds.priceRecords.length },
+        { type: '促销核验', count: pendingIds.promotionRecords.length },
+        { type: '照片证据', count: pendingIds.photos.length },
+        { type: '整改项', count: pendingIds.rectifications.length }
+      ]
+    };
 
     set({
       pendingSyncIds: {
@@ -318,7 +360,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         photos: [],
         rectifications: []
       },
-      lastSyncTime: now
+      lastSyncTime: now,
+      syncLogs: [syncLog, ...state.syncLogs].slice(0, 20)
     });
     saveToStorage(get());
     return true;
@@ -370,6 +413,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     ];
   },
 
+  getPendingSyncDetails: () => {
+    const state = get();
+    const ids = state.pendingSyncIds;
+    return {
+      priceRecords: state.priceRecords.filter((r) => ids.priceRecords.includes(r.id)),
+      promotionRecords: state.promotionRecords.filter((r) => ids.promotionRecords.includes(r.id)),
+      photos: state.photos.filter((p) => ids.photos.includes(p.id)),
+      rectifications: state.rectifications.filter((r) => ids.rectifications.includes(r.id))
+    };
+  },
+
   resetAllData: () => {
     localStorage.removeItem(STORAGE_KEY);
     set({
@@ -381,7 +435,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       tasks: mockTasks,
       isOffline: false,
       pendingSyncIds: initialPendingSync,
-      lastSyncTime: null
+      lastSyncTime: null,
+      syncLogs: []
     });
   }
 }));

@@ -16,7 +16,9 @@ import {
   Space,
   Alert,
   Modal,
-  Upload
+  Upload,
+  Tabs,
+  Empty
 } from 'antd';
 import {
   SettingOutlined,
@@ -29,7 +31,9 @@ import {
   WifiOutlined,
   DisconnectOutlined,
   FileTextOutlined,
-  DeleteOutlined
+  DeleteOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined
 } from '@ant-design/icons';
 import { useAppStore } from '../store/appStore';
 import { mockProducts } from '../data/mockData';
@@ -37,11 +41,13 @@ import { mockProducts } from '../data/mockData';
 const { Option } = Select;
 
 const Settings: React.FC = () => {
-  const { user, products, setOffline, isOffline, syncProducts, pendingSyncIds, syncAllData, getPendingSyncCount, getSyncStatus, resetAllData, priceRecords, promotionRecords, photos, rectifications, lastSyncTime } = useAppStore();
+  const { user, products, setOffline, isOffline, syncProducts, pendingSyncIds, syncAllData, getPendingSyncCount, getSyncStatus, getPendingSyncDetails, resetAllData, priceRecords, promotionRecords, photos, rectifications, lastSyncTime, syncLogs } = useAppStore();
   const [form] = Form.useForm();
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
   const [dataSyncing, setDataSyncing] = useState(false);
+  const [pendingDetailVisible, setPendingDetailVisible] = useState(false);
+  const [syncLogVisible, setSyncLogVisible] = useState(false);
   const [aboutModal, setAboutModal] = useState(false);
   const [clearDataModal, setClearDataModal] = useState(false);
 
@@ -55,6 +61,8 @@ const Settings: React.FC = () => {
   ], [pendingSyncIds]);
 
   const syncStatus = useMemo(() => getSyncStatus(), [pendingSyncIds, priceRecords, promotionRecords, photos, rectifications]);
+
+  const pendingDetails = useMemo(() => getPendingSyncDetails(), [pendingSyncIds, priceRecords, promotionRecords, photos, rectifications]);
 
   const formattedLastSyncTime = useMemo(() => {
     if (!lastSyncTime) return '从未同步';
@@ -265,6 +273,25 @@ const Settings: React.FC = () => {
               >
                 {pendingCount > 0 ? `同步所有数据（${pendingCount}条待同步）` : '数据已全部同步'}
               </Button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <Button
+                  size="small"
+                  type="link"
+                  onClick={() => setPendingDetailVisible(true)}
+                  disabled={pendingCount === 0}
+                  style={{ flex: 1 }}
+                >
+                  查看待同步明细
+                </Button>
+                <Button
+                  size="small"
+                  type="link"
+                  onClick={() => setSyncLogVisible(true)}
+                  style={{ flex: 1 }}
+                >
+                  同步日志 ({syncLogs.length})
+                </Button>
+              </div>
             </div>
 
             <div style={{ padding: '16px 0' }}>
@@ -485,6 +512,237 @@ const Settings: React.FC = () => {
           type="warning"
           showIcon
         />
+      </Modal>
+
+      <Modal
+        title="待同步数据明细"
+        open={pendingDetailVisible}
+        onCancel={() => setPendingDetailVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setPendingDetailVisible(false)}>
+            关闭
+          </Button>
+        ]}
+        width={700}
+      >
+        <Tabs
+          defaultActiveKey="price"
+          items={[
+            {
+              key: 'price',
+              label: (
+                <span>
+                  核价记录
+                  <Tag color="red" style={{ marginLeft: 6 }}>
+                    {pendingDetails.priceRecords.length}
+                  </Tag>
+                </span>
+              ),
+              children: pendingDetails.priceRecords.length > 0 ? (
+                <List
+                  size="small"
+                  dataSource={pendingDetails.priceRecords}
+                  renderItem={(item: any) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        title={item.productName || item.productId}
+                        description={
+                          <span>
+                            标准价：¥{item.standardPrice} · 实际价：¥{item.actualPrice}
+                            {item.isCorrect ? (
+                              <Tag color="green" style={{ marginLeft: 8 }}>正常</Tag>
+                            ) : (
+                              <Tag color="red" style={{ marginLeft: 8 }}>异常</Tag>
+                            )}
+                          </span>
+                        }
+                      />
+                      <span style={{ fontSize: 12, color: '#999' }}>{item.checkTime}</span>
+                    </List.Item>
+                  )}
+                />
+              ) : (
+                <Empty description="暂无待同步数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )
+            },
+            {
+              key: 'promotion',
+              label: (
+                <span>
+                  促销核验
+                  <Tag color="orange" style={{ marginLeft: 6 }}>
+                    {pendingDetails.promotionRecords.length}
+                  </Tag>
+                </span>
+              ),
+              children: pendingDetails.promotionRecords.length > 0 ? (
+                <List
+                  size="small"
+                  dataSource={pendingDetails.promotionRecords}
+                  renderItem={(item: any) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        title={item.productName || item.productId}
+                        description={
+                          <span>
+                            促销价：¥{item.promotionPrice} · 实际价：¥{item.actualPrice}
+                            {item.isCorrect ? (
+                              <Tag color="green" style={{ marginLeft: 8 }}>合规</Tag>
+                            ) : (
+                              <Tag color="orange" style={{ marginLeft: 8 }}>不合规</Tag>
+                            )}
+                          </span>
+                        }
+                      />
+                      <span style={{ fontSize: 12, color: '#999' }}>{item.checkTime}</span>
+                    </List.Item>
+                  )}
+                />
+              ) : (
+                <Empty description="暂无待同步数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )
+            },
+            {
+              key: 'photos',
+              label: (
+                <span>
+                  照片证据
+                  <Tag color="blue" style={{ marginLeft: 6 }}>
+                    {pendingDetails.photos.length}
+                  </Tag>
+                </span>
+              ),
+              children: pendingDetails.photos.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                  {pendingDetails.photos.map((photo: any) => (
+                    <div
+                      key={photo.id}
+                      style={{
+                        width: '100%', aspectRatio: '1', borderRadius: 4, overflow: 'hidden',
+                        background: '#f5f5f5', position: 'relative'
+                      }}
+                    >
+                      <img
+                        src={photo.thumbnail || photo.url}
+                        alt={photo.description || '证据照片'}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                      {photo.description && (
+                        <div style={{
+                          position: 'absolute', bottom: 0, left: 0, right: 0,
+                          background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: 11,
+                          padding: '2px 4px', overflow: 'hidden', textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {photo.description}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Empty description="暂无待同步数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )
+            },
+            {
+              key: 'rectification',
+              label: (
+                <span>
+                  整改项
+                  <Tag color="warning" style={{ marginLeft: 6 }}>
+                    {pendingDetails.rectifications.length}
+                  </Tag>
+                </span>
+              ),
+              children: pendingDetails.rectifications.length > 0 ? (
+                <List
+                  size="small"
+                  dataSource={pendingDetails.rectifications}
+                  renderItem={(item: any) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        title={item.title}
+                        description={
+                          <span>
+                            负责人：{item.responsiblePerson} · 期限：{item.deadline}
+                            <Tag
+                              color={
+                                item.status === 'completed' ? 'green' :
+                                item.status === 'pending' ? 'red' :
+                                item.status === 'processing' ? 'orange' : 'blue'
+                              }
+                              style={{ marginLeft: 8 }}
+                            >
+                              {item.status === 'completed' ? '已完成' :
+                               item.status === 'pending' ? '待处理' :
+                               item.status === 'processing' ? '处理中' : '待复核'}
+                            </Tag>
+                          </span>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+              ) : (
+                <Empty description="暂无待同步数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )
+            }
+          ]}
+        />
+      </Modal>
+
+      <Modal
+        title="同步日志"
+        open={syncLogVisible}
+        onCancel={() => setSyncLogVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setSyncLogVisible(false)}>
+            关闭
+          </Button>
+        ]}
+        width={600}
+      >
+        {syncLogs.length > 0 ? (
+          <List
+            size="small"
+            dataSource={syncLogs}
+            renderItem={(log: any) => (
+              <List.Item>
+                <List.Item.Meta
+                  avatar={
+                    log.result === 'success'
+                      ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 20 }} />
+                      : <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 20 }} />
+                  }
+                  title={
+                    <span>
+                      同步{log.result === 'success' ? '成功' : '失败'}
+                      <Tag color="blue" style={{ marginLeft: 8 }}>
+                        {log.totalCount} 条数据
+                      </Tag>
+                    </span>
+                  }
+                  description={
+                    <div>
+                      <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>
+                        {new Date(log.syncTime).toLocaleString('zh-CN')}
+                      </div>
+                      <div style={{ fontSize: 12 }}>
+                        {log.details.map((d: any) => (
+                          <Tag key={d.type} color="default" style={{ marginRight: 4 }}>
+                            {d.type}: {d.count}
+                          </Tag>
+                        ))}
+                      </div>
+                    </div>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        ) : (
+          <Empty description="暂无同步记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
       </Modal>
     </div>
   );

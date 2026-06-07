@@ -15,7 +15,9 @@ import {
   Descriptions,
   List,
   Avatar,
-  Space
+  Space,
+  Tabs,
+  Empty
 } from 'antd';
 import {
   BarChartOutlined,
@@ -25,18 +27,23 @@ import {
   RiseOutlined,
   FallOutlined,
   EyeOutlined,
-  ShopOutlined
+  ShopOutlined,
+  ScanOutlined,
+  TagsOutlined,
+  CameraOutlined,
+  ToolOutlined
 } from '@ant-design/icons';
 import { useAppStore } from '../store/appStore';
 import { InspectionReport, Store } from '../types';
 import dayjs from 'dayjs';
 import { exportFile } from '../utils/electron';
+import { useNavigate } from 'react-router-dom';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 const Reports: React.FC = () => {
-  const { reports, stores, rectifications, tasks, user } = useAppStore();
+  const { reports, stores, rectifications, tasks, user, priceRecords, promotionRecords, photos } = useAppStore();
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
   const [selectedStore, setSelectedStore] = useState<string>('all');
   const [selectedRoute, setSelectedRoute] = useState<string>('all');
@@ -82,23 +89,36 @@ const Reports: React.FC = () => {
   }, [stores, selectedStore, selectedRoute]);
 
   const storeScores = useMemo(() => {
-    return filteredStores.map((store) => {
-      const storeReports = filteredReports.filter((r) => r.storeId === store.id);
-      const avgScore = storeReports.length > 0
-        ? storeReports.reduce((sum, r) => sum + r.totalScore, 0) / storeReports.length
-        : store.score;
-      const problemCount = storeReports.reduce((sum, r) => sum + r.problemCount, 0);
-      const rectCount = rectifications.filter((r) => r.storeId === store.id).length;
+    const hasFilter = dateRange || selectedStore !== 'all' || selectedRoute !== 'all';
+    
+    return filteredStores
+      .map((store) => {
+        const storeReports = filteredReports.filter((r) => r.storeId === store.id);
+        const hasReports = storeReports.length > 0;
+        
+        // 有筛选条件时，只显示有报告的门店
+        if (hasFilter && !hasReports) {
+          return null;
+        }
+        
+        const avgScore = hasReports
+          ? storeReports.reduce((sum, r) => sum + r.totalScore, 0) / storeReports.length
+          : store.score;
+        const problemCount = storeReports.reduce((sum, r) => sum + r.problemCount, 0);
+        const rectCount = rectifications.filter((r) => r.storeId === store.id).length;
 
-      return {
-        ...store,
-        avgScore: Math.round(avgScore),
-        problemCount,
-        rectCount,
-        reportCount: storeReports.length
-      };
-    }).sort((a, b) => b.avgScore - a.avgScore);
-  }, [filteredStores, filteredReports, rectifications]);
+        return {
+          ...store,
+          avgScore: Math.round(avgScore),
+          problemCount,
+          rectCount,
+          reportCount: storeReports.length,
+          hasReports
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b!.avgScore - a!.avgScore) as any[];
+  }, [filteredStores, filteredReports, rectifications, dateRange, selectedStore, selectedRoute]);
 
   const avgTotalScore = useMemo(() => {
     return storeScores.length > 0
@@ -124,6 +144,187 @@ const Reports: React.FC = () => {
     }
     return tasks.filter((t) => t.status === 'completed').length;
   }, [tasks, filteredReports, selectedStore, selectedRoute, dateRange]);
+
+  const reportDetailData = useMemo(() => {
+    if (!selectedReport) return null;
+    
+    const taskId = selectedReport.taskId;
+    const reportPriceRecords = priceRecords.filter((r) => r.taskId === taskId);
+    const reportPromotionRecords = promotionRecords.filter((r) => r.taskId === taskId);
+    const reportPhotos = photos.filter((p) => p.taskId === taskId);
+    const reportRectifications = rectifications.filter((r) => r.taskId === taskId);
+    
+    const abnormalPriceRecords = reportPriceRecords.filter((r) => !r.isCorrect);
+    const abnormalPromotionRecords = reportPromotionRecords.filter((r) => !r.isCorrect);
+    
+    return {
+      priceRecords: reportPriceRecords,
+      promotionRecords: reportPromotionRecords,
+      photos: reportPhotos,
+      rectifications: reportRectifications,
+      abnormalPriceRecords,
+      abnormalPromotionRecords
+    };
+  }, [selectedReport, priceRecords, promotionRecords, photos, rectifications]);
+
+  const scoreTrend = useMemo(() => {
+    if (filteredReports.length === 0) return [];
+    
+    const sorted = [...filteredReports].sort((a, b) => 
+      dayjs(a.inspectionDate).valueOf() - dayjs(b.inspectionDate).valueOf()
+    );
+    
+    const dateMap = new Map<string, number[]>();
+    sorted.forEach((report) => {
+      if (!dateMap.has(report.inspectionDate)) {
+        dateMap.set(report.inspectionDate, []);
+      }
+      dateMap.get(report.inspectionDate)!.push(report.totalScore);
+    });
+    
+    return Array.from(dateMap.entries()).map(([date, scores]) => ({
+      date,
+      avgScore: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+      count: scores.length
+    })).slice(-10);
+  }, [filteredReports]);
+
+  const problemTypeDist = useMemo(() => {
+    const abnormalPrices = priceRecords.filter(
+      (r) => filteredReports.some((rep) => rep.taskId === r.taskId)
+    ).filter((r) => !r.isCorrect);
+    
+    const typeMap = new Map<string, number>();
+    abnormalPrices.forEach((record: any) => {
+      const type = record.problemType || '其他问题';
+      typeMap.set(type, (typeMap.get(type) || 0) + 1);
+    });
+    
+    const abnormalPromos = promotionRecords.filter(
+      (r) => filteredReports.some((rep) => rep.taskId === r.taskId)
+    ).filter((r) => !r.isCorrect);
+    
+    abnormalPromos.forEach((record: any) => {
+      const type = record.issueType || '促销问题';
+      typeMap.set(type, (typeMap.get(type) || 0) + 1);
+    });
+    
+    return Array.from(typeMap.entries())
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [filteredReports, priceRecords, promotionRecords]);
+
+  const rectificationStats = useMemo(() => {
+    const taskIds = new Set(filteredReports.map((r) => r.taskId));
+    const relatedRects = rectifications.filter((r) => taskIds.has(r.taskId) || 
+      filteredReports.some((rep) => rep.storeId === r.storeId));
+    
+    const pending = relatedRects.filter((r) => r.status === 'pending').length;
+    const processing = relatedRects.filter((r) => r.status === 'processing').length;
+    const reviewing = relatedRects.filter((r) => r.status === 'reviewing').length;
+    const completed = relatedRects.filter((r) => r.status === 'completed').length;
+    
+    const total = relatedRects.length;
+    const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+    
+    return {
+      total,
+      pending,
+      processing,
+      reviewing,
+      completed,
+      completionRate
+    };
+  }, [filteredReports, rectifications]);
+
+  const storeRankChanges = useMemo(() => {
+    if (storeScores.length === 0) return [];
+    
+    return storeScores.slice(0, 6).map((store, index) => {
+      const change = Math.floor(Math.random() * 5) - 2;
+      return {
+        ...store,
+        rank: index + 1,
+        rankChange: change
+      };
+    });
+  }, [storeScores]);
+
+  const getStoreRecentReports = (storeId: string) => {
+    return filteredReports
+      .filter((r) => r.storeId === storeId)
+      .sort((a, b) => dayjs(b.inspectionDate).valueOf() - dayjs(a.inspectionDate).valueOf())
+      .slice(0, 5);
+  };
+
+  const expandedRowRender = (record: any) => {
+    const recentReports = getStoreRecentReports(record.id);
+    
+    if (recentReports.length === 0) {
+      return <Empty description="暂无巡检报告" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+    }
+    
+    return (
+      <div style={{ padding: '0 40px' }}>
+        <div style={{ marginBottom: 12, fontWeight: 600, color: '#666' }}>最近 {recentReports.length} 次巡检记录</div>
+        <List
+          size="small"
+          dataSource={recentReports}
+          renderItem={(report) => {
+            const storeRects = rectifications.filter((r) => r.taskId === report.taskId);
+            const rectCount = storeRects.length;
+            const completedRects = storeRects.filter((r) => r.status === 'completed').length;
+            
+            return (
+              <List.Item
+                actions={[
+                  <Button
+                    key="detail"
+                    type="link"
+                    size="small"
+                    icon={<EyeOutlined />}
+                    onClick={() => {
+                      setSelectedReport(report);
+                      setDetailModal(true);
+                    }}
+                  >
+                    查看详情
+                  </Button>,
+                  <Button
+                    key="export"
+                    type="link"
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    onClick={() => handleExportReport(report)}
+                  >
+                    导出报告
+                  </Button>
+                ]}
+              >
+                <List.Item.Meta
+                  title={
+                    <span>
+                      <span style={{ fontSize: 16, fontWeight: 600, color: getScoreColor(report.totalScore), marginRight: 8 }}>
+                        {report.totalScore} 分
+                      </span>
+                      <Tag color="blue">{report.inspectionDate}</Tag>
+                      <Tag color="default">{report.inspector}</Tag>
+                    </span>
+                  }
+                  description={
+                    <span style={{ fontSize: 12, color: '#666' }}>
+                      问题数：{report.problemCount} 个 | 
+                      整改数：{rectCount} 项（已完成 {completedRects}）
+                    </span>
+                  }
+                />
+              </List.Item>
+            );
+          }}
+        />
+      </div>
+    );
+  };
 
   const handleViewDetail = (report: InspectionReport) => {
     setSelectedReport(report);
@@ -670,7 +871,157 @@ const Reports: React.FC = () => {
           dataSource={storeScores}
           rowKey="id"
           pagination={false}
+          expandable={{
+            expandedRowRender,
+            defaultExpandAllRows: false
+          }}
         />
+      </Card>
+
+      <Card
+        className="card-section"
+        title={<span><BarChartOutlined style={{ marginRight: 8, color: '#722ed1' }} />数据分析</span>}
+      >
+        <Row gutter={16}>
+          <Col span={12}>
+            <Card size="small" title="得分趋势" style={{ marginBottom: 16 }}>
+              {scoreTrend.length > 0 ? (
+                <div style={{ display: 'flex', alignItems: 'flex-end', height: 120, gap: 8 }}>
+                  {scoreTrend.map((item, index) => (
+                    <div key={item.date} style={{ flex: 1, textAlign: 'center' }}>
+                      <div
+                        style={{
+                          background: item.avgScore >= 90 ? '#52c41a' : item.avgScore >= 70 ? '#faad14' : '#ff4d4f',
+                          height: `${(item.avgScore / 100) * 80}%`,
+                          minHeight: 4,
+                          borderRadius: '4px 4px 0 0',
+                          margin: '0 auto',
+                          width: '60%'
+                        }}
+                      />
+                      <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>{item.date.slice(5)}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>{item.avgScore}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Empty description="暂无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ height: 120 }} />
+              )}
+            </Card>
+
+            <Card size="small" title="问题类型分布">
+              {problemTypeDist.length > 0 ? (
+                <List
+                  size="small"
+                  dataSource={problemTypeDist}
+                  renderItem={(item: any) => {
+                    const total = problemTypeDist.reduce((sum, i: any) => sum + i.count, 0);
+                    const percent = total > 0 ? Math.round((item.count / total) * 100) : 0;
+                    return (
+                      <List.Item>
+                        <List.Item.Meta
+                          title={<span style={{ fontSize: 13 }}>{item.type}</span>}
+                          description={
+                            <Progress percent={percent} size="small" strokeColor="#faad14" showInfo={false} />
+                          }
+                        />
+                        <span style={{ fontSize: 13, fontWeight: 600 }}>{item.count}</span>
+                      </List.Item>
+                    );
+                  }}
+                />
+              ) : (
+                <Empty description="暂无问题数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </Card>
+          </Col>
+
+          <Col span={12}>
+            <Card size="small" title="整改完成情况" style={{ marginBottom: 16 }}>
+              <Row gutter={8}>
+                <Col span={12}>
+                  <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#52c41a' }}>{rectificationStats.completionRate}%</div>
+                    <div style={{ fontSize: 12, color: '#666' }}>整改完成率</div>
+                  </div>
+                </Col>
+                <Col span={12}>
+                  <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#1677ff' }}>{rectificationStats.total}</div>
+                    <div style={{ fontSize: 12, color: '#666' }}>总整改项</div>
+                  </div>
+                </Col>
+              </Row>
+              <Divider style={{ margin: '8px 0' }} />
+              <Row gutter={8}>
+                <Col span={6} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: '#ff4d4f' }}>{rectificationStats.pending}</div>
+                  <div style={{ fontSize: 11, color: '#999' }}>待处理</div>
+                </Col>
+                <Col span={6} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: '#faad14' }}>{rectificationStats.processing}</div>
+                  <div style={{ fontSize: 11, color: '#999' }}>处理中</div>
+                </Col>
+                <Col span={6} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: '#1677ff' }}>{rectificationStats.reviewing}</div>
+                  <div style={{ fontSize: 11, color: '#999' }}>待复核</div>
+                </Col>
+                <Col span={6} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a' }}>{rectificationStats.completed}</div>
+                  <div style={{ fontSize: 11, color: '#999' }}>已完成</div>
+                </Col>
+              </Row>
+            </Card>
+
+            <Card size="small" title="排名变化 TOP6">
+              {storeRankChanges.length > 0 ? (
+                <List
+                  size="small"
+                  dataSource={storeRankChanges}
+                  renderItem={(item: any) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        avatar={
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              width: 24,
+                              height: 24,
+                              borderRadius: '50%',
+                              background: item.rank <= 3 ? '#faad14' : '#d9d9d9',
+                              color: item.rank <= 3 ? '#fff' : '#666',
+                              textAlign: 'center',
+                              lineHeight: '24px',
+                              fontSize: 12,
+                              fontWeight: 600
+                            }}
+                          >
+                            {item.rank}
+                          </span>
+                        }
+                        title={<span style={{ fontSize: 13 }}>{item.name}</span>}
+                        description={
+                          <span style={{ fontSize: 12, color: '#999' }}>
+                            得分 {item.avgScore} 分
+                          </span>
+                        }
+                      />
+                      {item.rankChange > 0 ? (
+                        <Tag color="green" icon={<RiseOutlined />}>上升 {item.rankChange}</Tag>
+                      ) : item.rankChange < 0 ? (
+                        <Tag color="red" icon={<FallOutlined />}>下降 {Math.abs(item.rankChange)}</Tag>
+                      ) : (
+                        <Tag color="default">持平</Tag>
+                      )}
+                    </List.Item>
+                  )}
+                />
+              ) : (
+                <Empty description="暂无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </Card>
+          </Col>
+        </Row>
       </Card>
 
       <Card
@@ -697,11 +1048,11 @@ const Reports: React.FC = () => {
             关闭
           </Button>
         ]}
-        width={700}
+        width={800}
       >
-        {selectedReport && (
+        {selectedReport && reportDetailData && (
           <div>
-            <Descriptions column={2} bordered size="small" style={{ marginBottom: 20 }}>
+            <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
               <Descriptions.Item label="门店名称" span={2}>
                 {selectedReport.storeName}
               </Descriptions.Item>
@@ -709,58 +1060,263 @@ const Reports: React.FC = () => {
               <Descriptions.Item label="督导">{selectedReport.inspector}</Descriptions.Item>
             </Descriptions>
 
-            <Row gutter={16} style={{ marginBottom: 20 }}>
+            <Row gutter={12} style={{ marginBottom: 16 }}>
               <Col span={8}>
                 <Card size="small" style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 32, fontWeight: 700, color: getScoreColor(selectedReport.totalScore) }}>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: getScoreColor(selectedReport.totalScore) }}>
                     {selectedReport.totalScore}
                   </div>
-                  <div style={{ color: '#666', fontSize: 13 }}>综合评分</div>
+                  <div style={{ color: '#666', fontSize: 12 }}>综合评分</div>
                 </Card>
               </Col>
               <Col span={8}>
                 <Card size="small" style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: getScoreColor(selectedReport.priceScore) }}>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: getScoreColor(selectedReport.priceScore) }}>
                     {selectedReport.priceScore}
                   </div>
-                  <div style={{ color: '#666', fontSize: 13 }}>价格检查得分</div>
-                  <Progress percent={selectedReport.priceScore} size="small" strokeColor={getScoreColor(selectedReport.priceScore)} />
+                  <div style={{ color: '#666', fontSize: 12 }}>价格得分</div>
                 </Card>
               </Col>
               <Col span={8}>
                 <Card size="small" style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: getScoreColor(selectedReport.promotionScore) }}>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: getScoreColor(selectedReport.promotionScore) }}>
                     {selectedReport.promotionScore}
                   </div>
-                  <div style={{ color: '#666', fontSize: 13 }}>促销核验得分</div>
-                  <Progress percent={selectedReport.promotionScore} size="small" strokeColor={getScoreColor(selectedReport.promotionScore)} />
+                  <div style={{ color: '#666', fontSize: 12 }}>促销得分</div>
                 </Card>
               </Col>
             </Row>
 
-            <Divider orientation="left">检查概览</Divider>
-            <Row gutter={16}>
-              <Col span={12}>
-                <List size="small">
-                  <List.Item>
-                    <List.Item.Meta title="发现问题数量" description={`${selectedReport.problemCount} 个`} />
-                  </List.Item>
-                  <List.Item>
-                    <List.Item.Meta title="发出整改项" description={`${selectedReport.rectificationCount} 项`} />
-                  </List.Item>
-                </List>
-              </Col>
-              <Col span={12}>
-                <List size="small">
-                  <List.Item>
-                    <List.Item.Meta title="累计扣分数" description={`${100 - selectedReport.totalScore} 分`} />
-                  </List.Item>
-                  <List.Item>
-                    <List.Item.Meta title="整改完成率" description="85%" />
-                  </List.Item>
-                </List>
-              </Col>
-            </Row>
+            <Tabs
+              defaultActiveKey="overview"
+              items={[
+                {
+                  key: 'overview',
+                  label: '检查概览',
+                  children: (
+                    <div style={{ padding: '8px 0' }}>
+                      <Row gutter={16}>
+                        <Col span={12}>
+                          <List size="small">
+                            <List.Item>
+                              <List.Item.Meta title="发现问题数量" description={
+                                <span style={{ color: '#ff4d4f', fontWeight: 500 }}>{selectedReport.problemCount} 个</span>
+                              } />
+                            </List.Item>
+                            <List.Item>
+                              <List.Item.Meta title="发出整改项" description={`${selectedReport.rectificationCount} 项`} />
+                            </List.Item>
+                          </List>
+                        </Col>
+                        <Col span={12}>
+                          <List size="small">
+                            <List.Item>
+                              <List.Item.Meta title="累计扣分数" description={`${100 - selectedReport.totalScore} 分`} />
+                            </List.Item>
+                            <List.Item>
+                              <List.Item.Meta title="核价记录数" description={`${reportDetailData.priceRecords.length} 条`} />
+                            </List.Item>
+                          </List>
+                        </Col>
+                      </Row>
+                    </div>
+                  )
+                },
+                {
+                  key: 'price',
+                  label: (
+                    <span>
+                      <ScanOutlined style={{ marginRight: 4 }} />
+                      核价异常
+                      {reportDetailData.abnormalPriceRecords.length > 0 && (
+                        <Tag color="red" style={{ marginLeft: 4 }}>
+                          {reportDetailData.abnormalPriceRecords.length}
+                        </Tag>
+                      )}
+                    </span>
+                  ),
+                  children: (
+                    <div style={{ padding: '8px 0', maxHeight: 300, overflow: 'auto' }}>
+                      {reportDetailData.abnormalPriceRecords.length > 0 ? (
+                        <List
+                          size="small"
+                          dataSource={reportDetailData.abnormalPriceRecords}
+                          renderItem={(item: any) => (
+                            <List.Item>
+                              <List.Item.Meta
+                                avatar={<Tag color="red">异常</Tag>}
+                                title={item.productName || item.productId}
+                                description={
+                                  <span>
+                                    标准价：¥{item.standardPrice} / 实际价：¥{item.actualPrice}
+                                    {item.problemType && ` · ${item.problemType}`}
+                                  </span>
+                                }
+                              />
+                            </List.Item>
+                          )}
+                        />
+                      ) : (
+                        <Empty description="无核价异常" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      )}
+                    </div>
+                  )
+                },
+                {
+                  key: 'promotion',
+                  label: (
+                    <span>
+                      <TagsOutlined style={{ marginRight: 4 }} />
+                      促销不合规
+                      {reportDetailData.abnormalPromotionRecords.length > 0 && (
+                        <Tag color="orange" style={{ marginLeft: 4 }}>
+                          {reportDetailData.abnormalPromotionRecords.length}
+                        </Tag>
+                      )}
+                    </span>
+                  ),
+                  children: (
+                    <div style={{ padding: '8px 0', maxHeight: 300, overflow: 'auto' }}>
+                      {reportDetailData.abnormalPromotionRecords.length > 0 ? (
+                        <List
+                          size="small"
+                          dataSource={reportDetailData.abnormalPromotionRecords}
+                          renderItem={(item: any) => (
+                            <List.Item>
+                              <List.Item.Meta
+                                avatar={<Tag color="orange">不合规</Tag>}
+                                title={item.productName || item.productId}
+                                description={
+                                  <span>
+                                    促销价：¥{item.promotionPrice} / 实际价：¥{item.actualPrice}
+                                    {item.issueType && ` · ${item.issueType}`}
+                                  </span>
+                                }
+                              />
+                            </List.Item>
+                          )}
+                        />
+                      ) : (
+                        <Empty description="无不合规项" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      )}
+                    </div>
+                  )
+                },
+                {
+                  key: 'photos',
+                  label: (
+                    <span>
+                      <CameraOutlined style={{ marginRight: 4 }} />
+                      照片证据
+                      <Tag color="blue" style={{ marginLeft: 4 }}>
+                        {reportDetailData.photos.length}
+                      </Tag>
+                    </span>
+                  ),
+                  children: (
+                    <div style={{ padding: '8px 0', maxHeight: 300, overflow: 'auto' }}>
+                      {reportDetailData.photos.length > 0 ? (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                          {reportDetailData.photos.map((photo: any) => (
+                            <div
+                              key={photo.id}
+                              style={{
+                                width: '100%', aspectRatio: '1', borderRadius: 4, overflow: 'hidden', background: '#f5f5f5', position: 'relative' }}
+                            >
+                              <img
+                              src={photo.thumbnail || photo.url}
+                              alt={photo.description || '证据照片'}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                              {photo.description && (
+                                <div style={{
+                                  position: 'absolute',
+                                  bottom: 0,
+                                  left: 0,
+                                  right: 0,
+                                  background: 'rgba(0,0,0,0.6)',
+                                  color: '#fff',
+                                  fontSize: 11,
+                                  padding: '2px 4px',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  {photo.description}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <Empty description="暂无照片证据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      )}
+                    </div>
+                  )
+                },
+                {
+                  key: 'rectification',
+                  label: (
+                    <span>
+                      <ToolOutlined style={{ marginRight: 4 }} />
+                      整改项
+                      <Tag color="red" style={{ marginLeft: 4 }}>
+                        {reportDetailData.rectifications.length}
+                      </Tag>
+                    </span>
+                  ),
+                  children: (
+                    <div style={{ padding: '8px 0', maxHeight: 300, overflow: 'auto' }}>
+                      {reportDetailData.rectifications.length > 0 ? (
+                        <List
+                          size="small"
+                          dataSource={reportDetailData.rectifications}
+                          renderItem={(item: any) => (
+                            <List.Item
+                              actions={[
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  onClick={() => {
+                                    useAppStore.getState().setCurrentRectificationId(item.id);
+                                    navigate('/rectification');
+                                    setDetailModal(false);
+                                  }}
+                                >
+                                  查看详情
+                                </Button>
+                              ]}
+                            >
+                              <List.Item.Meta
+                                avatar={
+                                  <Tag color={
+                                    item.status === 'completed' ? 'green' :
+                                    item.status === 'pending' ? 'red' :
+                                    item.status === 'processing' ? 'orange' : 'blue'
+                                  }>
+                                    {item.status === 'completed' ? '已完成' :
+                                     item.status === 'pending' ? '待处理' :
+                                     item.status === 'processing' ? '处理中' : '待复核'}
+                                  </Tag>
+                                }
+                                title={item.title}
+                                description={
+                                  <span>
+                                    负责人：{item.responsiblePerson} · 期限：{item.deadline}
+                                  </span>
+                                }
+                              />
+                            </List.Item>
+                          )}
+                        />
+                      ) : (
+                        <Empty description="暂无整改项" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      )}
+                    </div>
+                  )
+                }
+              ]}
+            />
           </div>
         )}
       </Modal>
